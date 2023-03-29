@@ -3,3 +3,4 @@ tensorflow-cpu
 pyarrow
 dask
 ipykernel
+pyquaternion
