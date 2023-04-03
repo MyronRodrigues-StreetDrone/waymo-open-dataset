@@ -43,10 +43,14 @@ def time_msg_from_timestamp_us(timestamp_us: int):
     return Time(sec=int(timestamp_us/1e6), nanosec=int((timestamp_us%1e6)*1e3))
 
 
-def lidar_range_img_to_pcd_xyzi_msg(range_img, lidar_calib, lidar_frame: str, time_msg: Time):
-    pc = v2.convert_range_image_to_point_cloud(range_img, lidar_calib, keep_polar_features=True)
-    pc = np.rec.fromarrays(tf.transpose(tf.gather(pc, [3,4,5,1], axis=1)),
-                           dtype={'names': ('x', 'y', 'z', 'i'),
+def lidar_range_img_to_pcd_xyzi_msg(range_img1, range_img2, lidar_calib, lidar_frame: str, time_msg: Time):
+    pc1 = v2.convert_range_image_to_point_cloud(range_img1, lidar_calib, keep_polar_features=True)
+    pc2 = v2.convert_range_image_to_point_cloud(range_img2, lidar_calib, keep_polar_features=True)
+    pc = np.rec.fromarrays(
+       tf.transpose(
+        tf.gather(
+          tf.concat([pc1, pc2], axis=0, name='concat'), [3,4,5,1], axis=1)),
+                           dtype={'names': ('x', 'y', 'z', 'intensity'),
                                   'formats': (np.float32, np.float32, np.float32, np.float32)})
     return rnpy.array_to_pointcloud2(pc, time_msg, lidar_frame)
 
@@ -102,7 +106,9 @@ def make_rosbag2(dataframe, bag_out_path,
       vehicle_pose = np.array(vehicle_pose_df.world_from_vehicle.transform).reshape((4,4))
       lidar_pose = np.array(lidar_calib.extrinsic.transform).reshape((4,4))
       
-      pcd_msg = lidar_range_img_to_pcd_xyzi_msg(lidar.range_image_return1, lidar_calib, lidar_frame, time_msg)
+      pcd_msg = lidar_range_img_to_pcd_xyzi_msg(lidar.range_image_return1,
+                                                lidar.range_image_return2,
+                                                lidar_calib, lidar_frame, time_msg)
       rb_writer.write(pointcloud_topic, pcd_msg, time_ns)
 
       dyn_tf = TFMessage()
