@@ -7,7 +7,7 @@ import ros2_numpy as rnpy
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TFMessage
 from pyquaternion import Quaternion
-
+from pathlib import Path
 from waymo_open_dataset import v2
 import tensorflow as tf
 import dask.dataframe as dd
@@ -80,33 +80,14 @@ def merge_frames(lidar_df, lidar_calib_df, vehicle_pose_df):
   lidar_lcalib_df = v2.merge(lidar_df, lidar_calib_df, right_group=True)
   return v2.merge(vehicle_pose_df, lidar_lcalib_df, right_group=False)
 
-def main():
-  lidar_frame = 'base_link'
-  vehicle_frame = '/lidar'
-  map_frame = 'map'
-  pointcloud_topic = '/points'
-  lidar_id = 1
-  out_path_prefix = ""
-  dataset_path_prefix = ""
-
-  # Path to the directory with all components
-  dataset_dir = '/home/myron/data/Waymo/data'
-  context = '10504764403039842352_460_000_480_000'
-
-  lidar_df = dd.read_parquet(f'{dataset_dir}/lidar/testing_lidar_{context}.parquet')
-  lidar_calib_df = dd.read_parquet(f'{dataset_dir}/lidar_calibration/testing_lidar_calibration_{context}.parquet')
-  vehicle_pose_df = dd.read_parquet(f'{dataset_dir}/vehicle_pose/testing_vehicle_pose_10504764403039842352_460_000_480_000.parquet')
-
-  lidar_lcalib_vpose_df = merge_frames(lidar_df, lidar_calib_df, vehicle_pose_df)
-
-  bag_out_path = f'output/waymo_{context}'
+def make_rosbag2(dataframe, bag_out_path,
+                 pointcloud_topic='points', lidar_frame = '/lidar',
+                 map_frame='mape', vehicle_frame='base_link', lidar_id=1):
   rb_writer = RosbagWriter({pointcloud_topic: 'sensor_msgs/msg/PointCloud2',
-                            '/tf': 'tf2_msgs/msg/TFMessage',
-                            '/tf_static': 'tf2_msgs/msg/TFMessage'}, bag_out_path)
-
+                          '/tf': 'tf2_msgs/msg/TFMessage',
+                          '/tf_static': 'tf2_msgs/msg/TFMessage'}, bag_out_path)
   written_static_tf = False
-
-  for _, r in lidar_lcalib_vpose_df.iterrows():
+  for _, r in dataframe.iterrows():
     # Create component dataclasses for the raw data
     lidar = v2.LiDARComponent.from_dict(r)
     laser_name = int(lidar.key.laser_name)
@@ -135,6 +116,31 @@ def main():
           make_transform_msg(np.linalg.inv(lidar_pose), vehicle_frame, lidar_frame, time_msg))
         rb_writer.write('/tf_static', static_tf, time_ns)
         written_static_tf = True
+
+def main():
+  lidar_frame = 'base_link'
+  vehicle_frame = '/lidar'
+  map_frame = 'map'
+  pointcloud_topic = '/points'
+  lidar_id = 1
+  dataset_dir = Path("/media/myron/715851be-98ca-40b5-b47a-8a3c72b5419d/data/waymo_od2/validation")
+  bag_out_path = Path("/media/myron/715851be-98ca-40b5-b47a-8a3c72b5419d/data/waymo_od2/rosbags/validation")
+
+  lidar_dir = dataset_dir/'lidar'
+  vehicle_pose_dir = dataset_dir/'vehicle_pose'
+  lidar_calib_dir = dataset_dir/'lidar_calibration'
+
+  for lpath in lidar_dir.iterdir():
+     if lpath.suffix == '.parquet':
+        context = lpath.stem
+        print('processing: ', context)
+        lidar_df = dd.read_parquet(lpath)
+        lidar_calib_df = dd.read_parquet(lidar_calib_dir/(context+'.parquet'))
+        vehicle_pose_df = dd.read_parquet(vehicle_pose_dir/(context+'.parquet'))
+        lidar_lcalib_vpose_df = merge_frames(lidar_df, lidar_calib_df, vehicle_pose_df)
+        make_rosbag2(lidar_lcalib_vpose_df, str(bag_out_path/context), pointcloud_topic, lidar_frame,
+                     map_frame, vehicle_frame, lidar_id)
+        print('done processing: ', context)
 
 
 if __name__ == '__main__':
